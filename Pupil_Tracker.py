@@ -211,5 +211,6 @@ class PupilDetector:
                 cv2.destroyAllWindows()
                 break
             
-pupil_detector = PupilDetector()
-pupil_detector.detect_pupil()
+if __name__ == '__main__':
+    pupil_detector = PupilDetector()
+    pupil_detector.detect_pupil()
