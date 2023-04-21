@@ -1,6 +1,22 @@
 # Pupil_Tracker
 A gaze/pupil tracker based on an algorithm published by Timm Fabian and Erhardt Barth. The paper can be found at https://www.inb.uni-luebeck.de/fileadmin/files/PUBPDFS/TiBa11b.pdf . It basically uses the color gradient field produced by the usually much darker pupil to find the center.
 
+# Usage
+Install opencv-python via pip
+````
+pip install opencv-python
+````
+or
+````
+pip install -r requirements.txt
+````
+
+Then simply call the script
+````
+python Pupil_Tracker.py
+````
+It will print out the time per frame in seconds on every frame.
+
 # Speed/Efficiency
 My implementation uses haarcascades to find the eyes and then applies the algorithm to the extracted picture of the eye. To increase speed Gradient Ascent is used to find the optimum without having to calculate the reward function value of every pixel. The time for each frame depends somewhat on the dimensions of the extracted eye image, but the impact is reduced by using numpy vectorization. At a distance of about 40 centimeters with an HD-webcam each frame needs about 0.015 seconds on my machine, which is not particularly strong.
 
