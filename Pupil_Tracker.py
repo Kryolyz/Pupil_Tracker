@@ -6,176 +6,210 @@ Created on Sat Feb 16 20:02:17 2019
 
 import cv2
 import numpy as np
-from numba import jit
-import pyautogui as pag
 import time
 
-@jit(nopython=True,cache=True,fastmath=True)
-def gradx(pic,grad,mean,std):
-    if len(grad[:,:]) > 0:
-        for y in range(len(grad[:,0])):
-            for x in range(len(grad[0,:])-2):
-                grad[y,x+1] = (float(pic[y,x+2]) - float(pic[y,x])) / 2.0
-                
-        mean = np.mean(grad)
-        std = np.std(grad)
+class PupilDetector:
+    """
+    @brief      A class for detecting the pupil in a video stream.
+    
+    This class detects the pupil in a video stream by using OpenCV's Haar cascades
+    to detect the eyes and then applying a gradient ascent algorithm to find the center of the pupil.
+    """
+    def __init__(self):
+        """
+        @brief      Constructs a new instance of the PupilDetector class.
         
-        for y in range(len(grad[:,0])):
-            for x in range(len(grad[0,:])):
-                if grad[y,x] < 0.3 * mean + std and grad[y,x] > - 0.3 * mean - std:
-                    grad[y,x] = 0
-                if grad[y,x] > 0:
-                    grad[y,x] = 1
-                elif grad[y,x] < 0:
-                    grad[y,x] = -1
-    return grad
+        This constructor initializes the Haar cascade classifier for eye detection and opens a video stream from the default camera. It also sets some parameters for the gradient ascent algorithm.
+        """
+        # Initialize Haar cascade classifier for eye detection
+        self.eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_righteye_2splits.xml')
+        # Open video stream from default camera
+        self.cap = cv2.VideoCapture(0)
+        self.cap.set(3,1920)
+        self.cap.set(4,1280)
+        # Set parameters for gradient ascent algorithm
+        self.AscentArea = 2
+        self.maxGradientAscentSteps = 15
 
-@jit(nopython=True,cache=True,fastmath=True)
-def evaluate(x,y,gradix,gradiy,func):
-    if len(gradix[:,:]) > 0:
-        for cy in range(len(gradix[:,0])):
-            for cx in range(len(gradix[0,:])):
-                if y != cy and x != cx:
-                    dy = float(cy - y)
-                    dx = float(cx - x)
-                    norm = np.linalg.norm(np.array([dx,dy]))#np.sqrt(np.square(dx)+np.square(dy))
-                    dy = dy/norm
-                    dx = dx/norm
-                    func[cy,cx] = gradiy[cy,cx] * dy + gradix[cy,cx] * dx
-                    if func[cy,cx] < 0:
-                        func[cy,cx] = 0
-    #                func[cy,cx] = np.square(func[cy,cx])
-    return np.mean(func)
-
-eye_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_righteye_2splits.xml')
-#eye_cascadel = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_lefteye_2splits.xml')
-face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_alt2.xml')
-host = 'http://192.168.178.48:8080/shot.jpg'
-cap = cv2.VideoCapture(0)
-cap.set(3,1920)
-cap.set(4,1280)
-
-counter = 0
-maxFaceHeight = 0
-mean = 0
-std = 0
-calibration = 0
-cx = np.ones([4], dtype=float)
-cy = np.ones([4], dtype=float)
-rcx = np.zeros([4], dtype=float)
-rcy = np.zeros([4], dtype=float)
-sw,sh = pag.size()
-px = 1
-py = 1
-AscentArea = 2
-cutImagex = 450
-cutImagey = 150
-
-while True:
-    re, img = cap.read()
-#    stream = urlopen(host)
-#    imgNp = np.array(bytearray(stream.read()), dtype=np.uint8)
-#    img = cv2.imdecode(imgNp,-1)
-    img = img[cutImagey:img.shape[0]-cutImagey,cutImagex:img.shape[1]-cutImagex]
-    t = time.clock()
-    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    gray = cv2.GaussianBlur(gray,(13,13),4)
-#    clahe = cv2.createCLAHE(clipLimit = 1.0, tileGridSize=(8,8))
-#    gray = clahe.apply(gray)
-    
-    face = face_cascade.detectMultiScale(img)
-    if type(face) is not tuple:
-        for (x,y,w,h) in face:
-            rightface = gray[0:y+h,0:int(x+w*0.45)]
-        cv2.rectangle(img, (x,y), (x+w,y+h), (255,255,255))
+    def get_gradients(self, im):
+        """
+        @brief      Calculates the gradients of an image.
         
-    t = time.clock() - t
-    print(t)
+        @param      im    The image.
+        
+        This function calculates the gradients of an image using numpy's gradient function.
+        It then normalizes the gradients and sets small values to zero.
+        """
+        grad = np.zeros_like(im, dtype=float)
+        if grad.size > 0:
+            # Calculate gradients
+            gradients = np.gradient(im)
+            for grad in gradients:
+                # Normalize gradients
+                mean = np.mean(grad)
+                std = np.std(grad)
+                grad[(grad < 0.3 * mean + std) & (grad > -0.3 * mean - std)] = 0
+                grad[grad > 0] = 1
+                grad[grad < 0] = -1
+        self.gradient_x = gradients[1]
+        self.gradient_y = gradients[0]
     
-    eyes = eye_cascade.detectMultiScale(rightface)
-    if type(eyes) is not tuple:
-        for(x,y,w,h) in eyes:
-#            cv2.rectangle(rightface, (x,y),(x+w,y+h),(0,255,0),2)
-            yf = y
-            xf = x
-            hf = h
-            wf = w
-            cv2.rectangle(img, (int(x),int(y+15)), (int(x+60),int(y+55)), (0,255,0))
-            reye = rightface[int(y+h*0.3):int(y+h*0.5+30),int(x):int(x+w*0.2+50)]
-            #0.5 0.9 0.2 0.9
-    
-    gradix = np.zeros_like(reye, dtype=float)
-    gradx(reye,gradix,mean,std)
-    
-    gradiy = np.zeros_like(np.transpose(reye), dtype=float)
-    gradx(np.transpose(reye),gradiy,mean,std)
-    gradiy = np.transpose(gradiy)
-    
-    
-    func = np.zeros_like(reye, dtype=float)
-    means = np.zeros_like(reye,dtype=float)
-    y = int(reye.shape[0]/2)
-    x = int(reye.shape[1]/2)
-    loop = 0
-    if reye.shape[0] > 0 and reye.shape[1] > 0:
-        while True:
-#            if y-1 >= 0 and y+2 <= reye.shape[1] and x-1 >= 0 and x+2 <= reye.shape[0]: 
-            if y-AscentArea >= 0:
-                ymin = y-AscentArea
-            else:
-                ymin = 0
-                
-            if y+AscentArea <= reye.shape[0]:
-                ymax = y+AscentArea
-            else:
-                ymax = reye.shape[0]
-                
-            if x-AscentArea >= 0:
-                xmin = x-AscentArea
-            else:
-                xmin = 0
+    def evaluate(self, x, y, reward_function):
+        """
+        @brief      Evaluates the reward function at a given position.
+        
+        @param      x               The x coordinate of the position.
+        @param      y               The y coordinate of the position.
+        @param      reward_function  The reward function.
+        
+        @return     The mean value of the reward function.
+        
+        This function evaluates the reward function at a given position by calculating the dot product
+        between the gradient field and the direction from the current position to all other positions.
+        It then sets negative values to zero and returns the mean value of the reward function.
+        """
+        if self.gradient_x.size > 0:
+            # Calculate direction from current position to all other positions
+            cy, cx = np.indices(self.gradient_x.shape)
+            dy = (cy - y).astype(float)
+            dx = (cx - x).astype(float)
+            norm = np.linalg.norm(np.stack([dx, dy], axis=-1), axis=-1)
+            dy[norm != 0] /= norm[norm != 0]
+            dx[norm != 0] /= norm[norm != 0]
             
-            if x+AscentArea <= reye.shape[1]:
-                xmax = x+AscentArea
+            # Calculate dot product between gradient field and direction
+            reward_function = self.gradient_y * dy + self.gradient_x * dx
+            # Set negative values to zero
+            reward_function[reward_function < 0] = 0
+        return np.mean(reward_function)
+    
+    def gradient_ascent_step(self, x, y, eye):
+        """
+        @brief      Performs a single step of gradient ascent.
+        
+        @param      x     The x coordinate of the current position.
+        @param      y     The y coordinate of the current position.
+        @param      eye   The eye image.
+        
+        @return     A tuple containing a boolean indicating whether to continue gradient ascent and the new x and y coordinates.
+        
+        This function performs a single step of gradient ascent to find the center of the pupil in an eye image.
+        It evaluates the reward function in a local area around the current position and moves to the position with the highest reward.
+        """
+        
+        # Determine the local area around the current position
+        if y - self.AscentArea >= 0:
+            ymin = y - self.AscentArea
+        else:
+            ymin = 0
+            
+        if y + self.AscentArea <= eye.shape[0]:
+            ymax = y + self.AscentArea
+        else:
+            ymax = eye.shape[0]
+            
+        if x - self.AscentArea >= 0:
+            xmin = x - self.AscentArea
+        else:
+            xmin = 0
+        
+        if x + self.AscentArea <= eye.shape[1]:
+            xmax = x+self.AscentArea
+        else:
+            xmax = eye.shape[1]
+        
+        # Evaluate the reward function in the local area
+        continueGradientAscent = False
+        for i in np.arange(ymin, ymax):
+            for j in np.arange(xmin, xmax):
+                if self.means[i,j] < 10:
+                    self.means[i,j] = (255-eye[i,j]) * self.evaluate(j,i,self.reward_function)
+                    # Move to the position with the highest reward
+                    if self.means[i,j] > self.means[y,x]:
+                        continueGradientAscent = True
+                        y = i
+                        x = j
+        return continueGradientAscent, x, y
+        
+    
+    def detect_pupil(self):
+        """
+        @brief      Detects the pupil in a video stream.
+        
+        This function detects the pupil in a video stream by using OpenCV's Haar cascades to detect
+        the eyes and then applying a gradient ascent algorithm to find the center of the pupil.
+        """
+        while True:
+            # Read a frame from the video stream
+            re, img = self.cap.read()
+            if not re:
+                continue
+            
+            # Time the entire thing
+            t = time.time()
+            
+            # Convert the image to grayscale and apply Gaussian blur
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            gray = cv2.GaussianBlur(gray,(13,13),4)
+            
+            # Detect eyes using Haar cascades
+            eyes = self.eye_cascade.detectMultiScale(gray)
+            eye_position = []
+            if type(eyes) is not tuple:
+                if (len(eyes) < 2):
+                    x,y,w,h = eyes[0]
+                else:
+                    # Choose the leftmost eye in the video (which most likely is your right eye)
+                    if eyes[0][0] < eyes[1][0]:
+                        x,y,w,h = eyes[0]
+                    else:
+                        x,y,w,h = eyes[1]
+                        
+                # Store eye position and draw a rectangle around it
+                eye_position = [x,y,w,h]
+                eye_position[1] += 0.3*h
+                cv2.rectangle(img, (int(x),int(y+h*0.3)), (int(x+w),int(y+h)), (0,255,0))
+                eye = gray[int(y+h*0.3):int(y+h),int(x):int(x+w)]
             else:
-                xmax = reye.shape[1]
+                continue
+            
+            # Calculate gradients
+            self.get_gradients(eye)
+            
+            # Initialize variables for gradient ascent
+            y = int(eye.shape[0]/2)
+            x = int(eye.shape[1]/2)
+            loop = 0
                 
-            contin = 0
-            for i in np.arange(ymin, ymax):
-                for j in np.arange(xmin, xmax):
-                    if means[i,j] < 10:
-                        means[i,j] = (255-reye[i,j]) * evaluate(j,i,gradix,gradiy,func)
-                        if means[i,j] > means[y,x]:
-                            contin = 1
-                            y = i
-                            x = j
-            loop = loop + 1
-            if contin == 0 or loop == 10:
+            self.reward_function = np.zeros_like(eye, dtype=float)
+            self.means = np.zeros_like(eye,dtype=float)
+            
+            if eye.shape[0] > 0 and eye.shape[1] > 0:
+                # Perform gradient ascent to find the center of the pupil
+                while True:
+                    continueGradientAscent, x, y = self.gradient_ascent_step(x, y, eye)
+                    loop = loop + 1
+                    if not continueGradientAscent or loop == self.maxGradientAscentSteps:
+                        break
+            
+            # Print time
+            t = time.time() - t
+            print(t)
+            
+            # Draw a circle around the detected pupil center
+            cv2.circle(eye,(x,y), 1, (255,255,255))
+            cv2.circle(img,(int(eye_position[0]+x),int(eye_position[1]+y)), 2, (0,0,255))
+            scaled = cv2.resize(eye, (eye.shape[1]*6,eye.shape[0]*6), interpolation = cv2.INTER_CUBIC)
+            cv2.imshow('Cam',img)
+            cv2.imshow('Eye',255-scaled)
+            
+            
+            k = cv2.waitKey(1) & 0xff
+            
+            if k == 27:
+                self.cap.release()
+                cv2.destroyAllWindows()
                 break
-    
-    cv2.circle(reye,(x,y), 1, (255,255,255))
-    cx[3] = int(x+xf+0.2*wf)
-    cy[3] = int(y+yf+0.5*hf)
-    cv2.circle(img,(int(x+xf),int(y+yf+0.3*hf)), 2, (0,0,255))
-    scaled = cv2.resize(reye, (reye.shape[1]*6,reye.shape[0]*6), interpolation = cv2.INTER_CUBIC)
-    cv2.imshow('Cam',img)
-    cv2.imshow('Eye',255-scaled)
-    
-    k = cv2.waitKey(20) & 0xff
-    
-    if k == 27:
-        break
-    elif k == ord('7'):
-        print(calibration)
-#    elif k == ord('8'):
-#    elif k == ord('9'):
-#    elif k == ord('4'):
-#    elif k == ord('5'):
-#    elif k == ord('6'):
-#    elif k == ord('1'):
-#    elif k == ord('2'):
-#    elif k == ord('3'):
-    
-
-cap.release()
-cv2.destroyAllWindows()
+            
+pupil_detector = PupilDetector()
+pupil_detector.detect_pupil()
